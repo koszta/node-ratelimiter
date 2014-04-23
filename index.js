@@ -63,59 +63,36 @@ Limiter.prototype.get = function(fn){
   var limit = this.prefix + 'limit';
   var reset = this.prefix + 'reset';
   var duration = this.duration;
-  var s = this.duration / 1000 | 0;
   var max = this.max;
   var db = this.db;
 
-  function create() {
+  function mget(){
     var ex = (Date.now() + duration) / 1000 | 0;
-
     db
     .multi()
-    .setnx(count, max - 1)
+    .setnx(count, max)
     .setnx(reset, ex)
     .setnx(limit, max)
-    .expire(count, s)
-    .expire(limit, s)
-    .expire(reset, s)
+    .decr(count)
+    .mget(count, limit, reset)
     .exec(function(err, res){
+      var n = ~~res[4][0];
+      var max = ~~res[4][1];
+      var ex = ~~res[4][2];
       if (err) return fn(err);
-      if(!res[0]) return mget();
-      fn(null, {
-        total: max,
-        remaining: max - 1,
-        reset: ex
-      });
-    });
-  }
-
-  function decr(res) {
-    var n = ~~res[0];
-    var max = ~~res[1];
-    var ex = ~~res[2];
-
-    if (n <= 0) return done();
-
-    function done() {
+      if (!!res[1]){
+        db
+        .multi()
+        .expireat(count, ex)
+        .expireat(limit, ex)
+        .expireat(reset, ex)
+        .exec();
+      };
       fn(null, {
         total: max,
         remaining: n < 0 ? 0 : n,
         reset: ex
       });
-    }
-
-    db.decr(count, function(err, res){
-      if (err) return fn(err);
-      n = ~~res;
-      done();
-    });
-  }
-
-  function mget(){
-    db.mget(count, limit, reset, function(err, res){
-      if (err) return fn(err);
-      if (!res[0]) return create();
-      decr(res);
     });
   }
 
